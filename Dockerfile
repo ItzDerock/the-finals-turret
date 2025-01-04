@@ -61,6 +61,7 @@ RUN python3 -m venv /opt/venv && \
   websocket-client \
   PID_Py \
   python-dotenv \
+  rel wsaccel \
   "numpy<2" && \
   /opt/venv/bin/pip install --no-cache-dir \
   "onnxruntime-gpu==1.17.1" \

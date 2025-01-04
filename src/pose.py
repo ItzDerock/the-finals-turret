@@ -1,6 +1,5 @@
-from dotenv import load_dotenv
-
 # Load environment variables before anything else
+from dotenv import load_dotenv
 load_dotenv()
 
 import cv2
@@ -8,30 +7,26 @@ import torch
 import time
 import send
 import pid
+import numpy as np
 from cli import options
-from juxtapose import RTM, Annotator, RTMDet, RTMPose
+from juxtapose import Annotator, RTMDet, RTMPose
+from juxtapose.trackers import Tracker
+from juxtapose.utils.core import Detections
+from juxtapose.utils.ops import Profile
 from multiprocessing import Process, Pipe
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Initialize RTM model
-model = RTM(
-    det="rtmdet-s",
-    pose="rtmpose-s",
-    tracker="bytetrack",
-    device=device
-)
-
 # Configurations
-CENTER_THRESHOLD = 50  # Pixels for center threshold
+CENTER_THRESHOLD = 25 # Pixels for center threshold
 NO_DETECTION_TIMEOUT = 2  # Seconds before switching target
-
-# Annotator
-annotator = Annotator(thickness=3, font_color=(128, 128, 128))
 
 cap = cv2.VideoCapture(options.video)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, options.resolution[0]) # try to force the requested resolution
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, options.resolution[1])
+width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+center_x, center_y = width // 2, height // 2
 
 # Variables to track the target person and last detection time
 target_id = None
@@ -41,124 +36,111 @@ parent_conn, child_conn = Pipe(duplex=True)
 p = Process(target=send.update_board, args=(child_conn,))
 p.start()
 
-# Load the model
+# Load the models
 rtmdet = RTMDet("s", device=device)
+rtmpose = RTMPose("s", device=device)
+tracker = Tracker("bytetrack").tracker
+annotator = Annotator(thickness=3, font_color=(128, 128, 128))
+
+# Performance profiling
+# (detection, tracking, pose estimation)
+profilers = (Profile(), Profile(), Profile())
 
 # for result in model(32, imgsz=1920, show=True, plot=True, stream=True):
 while cap.isOpened():
+  ret, frame = cap.read()
+  if not ret:
+      break
 
+  # Perform detection
+  with profilers[0]:
+    detections: Detections = rtmdet(frame)
 
+  # Only do the expensive calculations if we found a person
+  if detections:
+    # Invoke bytetrack
+    with profilers[1]:
+      detections: Detections = tracker.update(
+        bboxes=detections.xyxy,
+        confidence=detections.confidence,
+        labels=detections.labels,
+      )
 
-    im, persons, kpts = result.im, result.persons, result.kpts
+    # Perform pose estimation
+    with profilers[2]:
+      kpts, kpts_scores = rtmpose(frame, bboxes=detections.xyxy)
 
-    if not persons or not kpts:
-        print("no one")
-        if time.time() - last_detection_time > NO_DETECTION_TIMEOUT:
-            target_id = None  # Reset target if no one is detected for long
-        continue
+    # Turn into an easier to use format
+    persons = [
+      {"id": str(id), "kpts": kpt.tolist(), "bboxes": bboxes}
+      for i, kpt, bboxes in zip(
+        detections.track_id, kpts, detections.xyxy.tolist()
+      )
+    ]
 
-    # Select or update target
-    if target_id is None:
-        target_id = persons[0]['id']  # Select the first person as target
-        last_detection_time = time.time()
+    # Draw
+    annotator.draw_bboxes(frame, detections.xyxy, labels=np.array(
+      [
+        f"person {id} {score:.2f}"
+        for score, label, id in zip(
+          detections.confidence, detections.labels, detections.track_id
+        )
+      ]
+    ))
 
-    # Find target person
-    target_person = next((person for person in persons if person['id'] == target_id), None)
+    annotator.draw_kpts(frame, kpts)
+    annotator.draw_skeletons(frame, kpts)
 
-    if target_person is None:
-        print("no one")
-        if time.time() - last_detection_time > NO_DETECTION_TIMEOUT:
-            target_id = None  # Reset target if current one is gone
-        continue
+    # Print the tracking stats
+    bbox_ms, track_ms, pose_ms = [profile.dt * 1e3 / 1 for profile in profilers]
+    fps = 1.0 / (bbox_ms + track_ms + pose_ms)
+    print(f"Found {len(persons)} person(s), bbox: {bbox_ms:.2f}ms, track: {track_ms:.2f}ms, pose: {pose_ms:.2f}ms | FPS: {fps:.2f}")
 
-    # Get keypoints for the target person
-    keypoints = target_person['kpts']
+    if persons:
+      # Select or update target
+      if target_id is None:
+          target_id = persons[0]['id']  # Select the first person as target
+          last_detection_time = time.time()
 
-    if keypoints is None or len(keypoints) < 5:  # Ensure head keypoints are available
-        print("no one")
-        if time.time() - last_detection_time > NO_DETECTION_TIMEOUT:
-            target_id = None
-        continue
+      # Find target person
+      target_person = next((person for person in persons if person['id'] == target_id), None)
 
-    last_detection_time = time.time()  # Update last detection time
+      if target_person is None:
+          print("no one")
+          if time.time() - last_detection_time > NO_DETECTION_TIMEOUT:
+              target_id = None  # Reset target if current one is gone
+          continue
 
-    # Extract head position (e.g., keypoint 0 for head center)
-    head_x, head_y = keypoints[0]
+      # Get keypoints for the target person
+      keypoints = target_person['kpts']
 
-    # Determine position relative to screen
-    frame_width = 1280
-    center_x = frame_width // 2
-    center_y = 720 // 2
+      if keypoints is None or len(keypoints) < 5:  # Ensure head keypoints are available
+          print("no one")
+          if time.time() - last_detection_time > NO_DETECTION_TIMEOUT:
+              target_id = None
+          continue
 
-    # if abs(head_x - center_x) <= CENTER_THRESHOLD:
-    #     continue
-    parent_conn.send("shoot" if abs(head_x - center_x) <= CENTER_THRESHOLD else "noshoot")
+      last_detection_time = time.time()  # Update last detection time
 
-    x = pid.X_PID(setpoint=head_x, processValue=center_x)
-    y = pid.Y_PID(setpoint=head_y, processValue=center_y)
+      # Extract head position (e.g., keypoint 0 for head center)
+      head_x, head_y = keypoints[0]
 
-    parent_conn.send(f"move {x} {y}")
+      # Determine position relative to screen
+            # if abs(head_x - center_x) <= CENTER_THRESHOLD:
+      #     continue
+      parent_conn.send("shoot" if abs(head_x - center_x) <= CENTER_THRESHOLD else "noshoot")
 
+      x = pid.X_PID(setpoint=head_x, processValue=center_x)
+      y = pid.Y_PID(setpoint=head_y, processValue=center_y)
 
-# import cv2
-# import torch
-# from cli import options
-# from juxtapose import RTM, Annotator
+      parent_conn.send(f"move {x} {y}")
+  else:
+    print("Found no targets")
+    if time.time() - last_detection_time > NO_DETECTION_TIMEOUT:
+        target_id = None  # Reset target if no one is detected for long
 
-# # Init a rtm model (including rtmdet, rtmpose, tracker)
-# model = RTM(
-#     det="rtmdet-s",
-#     pose="rtmpose-s",
-#     tracker="bytetrack",
-#     device="cuda" if torch.cuda.is_available() else "cpu",
-# )
-
-# # Load the requested video source
-# # cap = cv2.VideoCapture(options.video)
-# # cap.set(cv2.CAP_PROP_FRAME_WIDTH, options.resolution[0]) # try to force the requested resolution
-# # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, options.resolution[1])
-
-# annotator = Annotator(thickness=3, font_color=(128, 128, 128))  # see rtm.utils.plotting
-
-# for result in model(32, show=True, plot=True, stream=True):
-#     # do what ever you want with the data
-#     im, bboxes, kpts = result.im, result.bboxes, result.kpts
-
-#     # e.g custom plot anything using cv2 API
-#     cv2.putText(
-#         im, "custom text", (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (128, 128, 128)
-#     )
-
-#     # use the annotator class -> see rtm.utils.plotting
-#     annotator.draw_bboxes(
-#         im, bboxes, labels=[f"children_{i}" for i in range(len(bboxes))]
-#     )
-#     annotator.draw_kpts(im, kpts, thickness=4)
-#     annotator.draw_skeletons(im, kpts)    # do what ever you want with the data
-#     im, bboxes, kpts = result.im, result.bboxes, result.kpts
-
-#     # e.g custom plot anything using cv2 API
-#     cv2.putText(
-#         im, "custom text", (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (128, 128, 128)
-#     )
-
-#     # use the annotator class -> see rtm.utils.plotting
-#     annotator.draw_bboxes(
-#         im, bboxes, labels=[f"children_{i}" for i in range(len(bboxes))]
-#     )
-#     annotator.draw_kpts(im, kpts, thickness=4)
-#     annotator.draw_skeletons(im, kpts)    # do what ever you want with the data
-#     print(kpts) # Get the coordinates of the chest
-#     im, bboxes, kpts = result.im, result.bboxes, result.kpts
-
-#     # e.g custom plot anything using cv2 API
-#     cv2.putText(
-#         im, "custom text", (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (128, 128, 128)
-#     )
-
-#     # use the annotator class -> see rtm.utils.plotting
-#     annotator.draw_bboxes(
-#         im, bboxes, labels=[f"children_{i}" for i in range(len(bboxes))]
-#     )
-#     annotator.draw_kpts(im, kpts, thickness=4)
-#     annotator.draw_skeletons(im, kpts)
+  # show
+  cv2.imshow("Turret tracking", frame)
+  if cv2.waitKey(1) & 0xFF == ord('q'):
+    parent_conn.send("noshoot")
+    break

@@ -86,6 +86,7 @@ def update_board(conn: connection.Connection):
         websocket.send(build_klipper_ws_gcode_payload("""
           SET_KINEMATIC_POSITION X=500 Y=500 Z=180
           G91
+          G1 X2 Y2
         """))
 
         was_homed = True
@@ -96,15 +97,12 @@ def update_board(conn: connection.Connection):
 
         if cmd == "move":
             # parse that string
-            # axes, angle = cmd[0], float(cmd[1:])
-            # angle = float(cmd[1:])
             z, xy = float(args[0]), float(args[1])
 
             # build GCode
             # gcode = build_gcode_relative_move(axes, angle)
             # gcode = f"G1 X{xy} Y{xy} Z{z} F10000"
-            gcode = f"G1 Z{z}"
-            print(gcode)
+            gcode = f"FORCE_MOVE STEPPER=stepper_z DISTANCE={z} VELOCITY=50"
 
             # send GCode
             websocket.send(build_klipper_ws_gcode_payload(gcode))
