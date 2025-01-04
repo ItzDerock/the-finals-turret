@@ -2,13 +2,14 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import time
 import cv2
 import torch
 import time
-import send
 import pid
 import numpy as np
 from cli import options
+from send import KlipperWebSocketClient
 from juxtapose import Annotator, RTMDet, RTMPose
 from juxtapose.trackers import Tracker
 from juxtapose.utils.core import Detections
@@ -18,7 +19,7 @@ from multiprocessing import Process, Pipe
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Configurations
-CENTER_THRESHOLD = 25 # Pixels for center threshold
+CENTER_THRESHOLD = 60 # Pixels for center threshold
 NO_DETECTION_TIMEOUT = 2  # Seconds before switching target
 
 cap = cv2.VideoCapture(options.video)
@@ -33,24 +34,28 @@ target_id = None
 last_detection_time = time.time()
 
 parent_conn, child_conn = Pipe(duplex=True)
-p = Process(target=send.update_board, args=(child_conn,))
-p.start()
+client = KlipperWebSocketClient()
+p = Process(target=client.start, args=(child_conn,))
+if not options.dry_run:
+  p.start()
+  print("[i] Spawned communication thread")
 
 # Load the models
 rtmdet = RTMDet("s", device=device)
 rtmpose = RTMPose("s", device=device)
 tracker = Tracker("bytetrack").tracker
 annotator = Annotator(thickness=3, font_color=(128, 128, 128))
+print("[i] Models loaded")
 
 # Performance profiling
 # (detection, tracking, pose estimation)
 profilers = (Profile(), Profile(), Profile())
 
-# for result in model(32, imgsz=1920, show=True, plot=True, stream=True):
 while cap.isOpened():
   ret, frame = cap.read()
   if not ret:
-      break
+    print('[w] Ignoring empty frame')
+    continue
 
   # Perform detection
   with profilers[0]:
@@ -136,6 +141,7 @@ while cap.isOpened():
       parent_conn.send(f"move {x} {y}")
   else:
     print("Found no targets")
+    parent_conn.send("noshoot")
     if time.time() - last_detection_time > NO_DETECTION_TIMEOUT:
         target_id = None  # Reset target if no one is detected for long
 
@@ -143,4 +149,15 @@ while cap.isOpened():
   cv2.imshow("Turret tracking", frame)
   if cv2.waitKey(1) & 0xFF == ord('q'):
     parent_conn.send("noshoot")
+    print("[i] Recieved 'q' key. Exiting...")
+    # wait 100ms to ensure the message is sent
+    time.sleep(0.1)
     break
+
+# Clean up
+cap.release()
+cv2.destroyAllWindows()
+if not options.dry_run:
+  p.terminate()
+  p.join()
+  print("[i] Communication thread terminated")

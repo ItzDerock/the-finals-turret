@@ -69,98 +69,99 @@ shooting_enabled = True
 while cap.isOpened():
   success, frame = cap.read()
 
-  if success:
-    # Detect objects and extract bounding boxes
-    results = model.track(frame, persist=True, classes=[0],
-                          tracker="bytetrack.yaml", verbose=options.verbose)
+  if not success:
+    print('[w] Ignoring empty frame')
+    continue
 
-    boxes = results[0].boxes.xywh.cpu()
-    clss = results[0].boxes.cls.cpu().tolist()
+  # Detect objects and extract bounding boxes
+  results = model.track(frame, persist=True, classes=[0],
+                        tracker="bytetrack.yaml", verbose=options.verbose)
 
-    if results[0].boxes.id is not None:
-      track_ids = results[0].boxes.id.int().cpu().tolist()
-    else:
-      track_ids = []
+  boxes = results[0].boxes.xywh.cpu()
+  clss = results[0].boxes.cls.cpu().tolist()
 
-    # Draw bounding boxes and labels
-    annotator = Annotator(frame, line_width=2,
-                          example=str(names))
-
-    for box, track_id, cls in zip(boxes, track_ids, clss):
-      x, y, w, h = box
-      x1, y1, x2, y2 = (x - w / 2, y - h / 2,
-                        x + w / 2, y + h / 2)
-      label = str(names[cls]) + " : " + str(track_id)
-      annotator.box_label([x1, y1, x2, y2],
-                          label, (218, 100, 255))
-
-      # Keep track of previous locations for EMA
-      track = track_history[track_id]
-      track.append((float(box[0]), float(box[1]), time.time()))
-      if len(track) > 30:
-        track.pop(0)
-
-      # Draw the previous locations, extracting only (x,y) points
-      points = np.hstack([(p[0], p[1]) for p in track]).astype(np.int32).reshape((-1, 1, 2))
-      cv2.polylines(frame, [points], isClosed=False,
-                    color=(37, 255, 225), thickness=2)
-
-      # Circle indicating the center of the person.
-      cv2.circle(frame,
-                  (int(track[-1][0]), int(track[-1][1])),
-                  5, (235, 219, 11), -1)
-
-      # --------------
-      # The turret should only track ONE person at a time
-      # so it doesn't bounce between people
-      if current_target is None:
-        current_target = track_id
-        print("[i] Acquired new target with id: " + str(track_id))
-
-      # Ignore everyone else
-      if current_target != track_id:
-        continue
-
-      target_last_found = time.time()
-
-      # Find absolute angle of person
-      rel_phi, rel_theta = pixel_to_angle(track[-1][0], track[-1][1], width, height)
-      track_phi = current_phi + rel_phi
-      track_theta = current_theta + rel_theta
-
-      # Guess where we are probably going to go
-      predicted = predict_with_ema(track, PREDICT_TIME, alpha)
-
-      # Communicate the new angles to the board
-      if not options.dry_run:
-        parent_conn.send(f"move {str(rel_phi/45)} {str(rel_theta/45)}")
-
-        if shooting_enabled:
-          parent_conn.send("shoot" if rel_phi < 2 else "noshoot")
-
-      if options.verbose:
-        print("[d] phi = " + str(track_phi))
-        print("[d] theta = " + str(track_theta))
-
-      # Draw a circle representing the predicted location
-      if predicted is not None:
-        cv2.circle(frame,
-                    (int(predicted[0]), int(predicted[1])),
-                    10, (135, 206, 250), -1)
-
-    # If we haven't seen the target for a while, reset
-    if time.time() - target_last_found > 2:
-      current_target = None
-
-    # Show the frame, and quit if 'q' is pressed
-    cv2.imshow("Turret", frame)
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-      break
-    if cv2.waitKey(1) & 0xFF == ord("s"):
-      parent_conn.send("noshoot")
-      shooting_enabled = False
+  if results[0].boxes.id is not None:
+    track_ids = results[0].boxes.id.int().cpu().tolist()
   else:
-      break
+    track_ids = []
+
+  # Draw bounding boxes and labels
+  annotator = Annotator(frame, line_width=2,
+                        example=str(names))
+
+  for box, track_id, cls in zip(boxes, track_ids, clss):
+    x, y, w, h = box
+    x1, y1, x2, y2 = (x - w / 2, y - h / 2,
+                      x + w / 2, y + h / 2)
+    label = str(names[cls]) + " : " + str(track_id)
+    annotator.box_label([x1, y1, x2, y2],
+                        label, (218, 100, 255))
+
+    # Keep track of previous locations for EMA
+    track = track_history[track_id]
+    track.append((float(box[0]), float(box[1]), time.time()))
+    if len(track) > 30:
+      track.pop(0)
+
+    # Draw the previous locations, extracting only (x,y) points
+    points = np.hstack([(p[0], p[1]) for p in track]).astype(np.int32).reshape((-1, 1, 2))
+    cv2.polylines(frame, [points], isClosed=False,
+                  color=(37, 255, 225), thickness=2)
+
+    # Circle indicating the center of the person.
+    cv2.circle(frame,
+                (int(track[-1][0]), int(track[-1][1])),
+                5, (235, 219, 11), -1)
+
+    # --------------
+    # The turret should only track ONE person at a time
+    # so it doesn't bounce between people
+    if current_target is None:
+      current_target = track_id
+      print("[i] Acquired new target with id: " + str(track_id))
+
+    # Ignore everyone else
+    if current_target != track_id:
+      continue
+
+    target_last_found = time.time()
+
+    # Find absolute angle of person
+    rel_phi, rel_theta = pixel_to_angle(track[-1][0], track[-1][1], width, height)
+    track_phi = current_phi + rel_phi
+    track_theta = current_theta + rel_theta
+
+    # Guess where we are probably going to go
+    predicted = predict_with_ema(track, PREDICT_TIME, alpha)
+
+    # Communicate the new angles to the board
+    if not options.dry_run:
+      parent_conn.send(f"move {str(rel_phi/45)} {str(rel_theta/45)}")
+
+      if shooting_enabled:
+        parent_conn.send("shoot" if rel_phi < 2 else "noshoot")
+
+    if options.verbose:
+      print("[d] phi = " + str(track_phi))
+      print("[d] theta = " + str(track_theta))
+
+    # Draw a circle representing the predicted location
+    if predicted is not None:
+      cv2.circle(frame,
+                  (int(predicted[0]), int(predicted[1])),
+                  10, (135, 206, 250), -1)
+
+  # If we haven't seen the target for a while, reset
+  if time.time() - target_last_found > 2:
+    current_target = None
+
+  # Show the frame, and quit if 'q' is pressed
+  cv2.imshow("Turret", frame)
+  if cv2.waitKey(1) & 0xFF == ord("q"):
+    break
+  if cv2.waitKey(1) & 0xFF == ord("s"):
+    parent_conn.send("noshoot")
+    shooting_enabled = False
 
 cap.release()
 cv2.destroyAllWindows()
