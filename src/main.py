@@ -1,8 +1,14 @@
+from dotenv import load_dotenv
+
+# Load environment variables before anything else
+load_dotenv()
+
 import send
 import cv2
 import numpy as np
 import time
 import torch
+from cli import options
 from camera import pixel_to_angle
 from utils import predict_with_ema
 from PID_Py.PID import PID
@@ -11,12 +17,7 @@ from ultralytics import YOLO
 from collections import defaultdict
 from ultralytics.utils.plotting import Annotator
 from torch.quantization import quantize_dynamic
-from dotenv import load_dotenv
 from multiprocessing import Process, Pipe
-from .cli import options
-
-# Load environment variables
-load_dotenv()
 
 track_history = defaultdict(lambda: [])
 pid = PID(kp = 0.006, ki = 0, kd = 0.0002)
@@ -63,6 +64,7 @@ width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
 height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 current_target = None
 target_last_found = time.time()
+shooting_enabled = True
 
 while cap.isOpened():
   success, frame = cap.read()
@@ -131,7 +133,10 @@ while cap.isOpened():
 
       # Communicate the new angles to the board
       if not options.dry_run:
-        parent_conn.send("x" + str(track_phi))
+        parent_conn.send(f"move {str(rel_phi/45)} {str(rel_theta/45)}")
+
+        if shooting_enabled:
+          parent_conn.send("shoot" if rel_phi < 2 else "noshoot")
 
       if options.verbose:
         print("[d] phi = " + str(track_phi))
@@ -151,6 +156,9 @@ while cap.isOpened():
     cv2.imshow("Turret", frame)
     if cv2.waitKey(1) & 0xFF == ord("q"):
       break
+    if cv2.waitKey(1) & 0xFF == ord("s"):
+      parent_conn.send("noshoot")
+      shooting_enabled = False
   else:
       break
 

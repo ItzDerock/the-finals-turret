@@ -14,3 +14,6 @@ devenv.local.nix
 # cache stuff
 __pycache__/
 testing/
+
+model/
+.venv/

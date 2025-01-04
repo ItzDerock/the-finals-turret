@@ -8,4 +8,4 @@
 # Otherwise, please refer to the documentation and place the correct .run file into ~/.local/share/x11docker
 # https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container
 
-x11docker -g -I --sudouser -it --share "$(pwd)" --hostdisplay --runtime=nvidia --webcam turret_env
+x11docker -g -I --sudouser -it --share "$(pwd)" --hostdisplay --runtime=nvidia --webcam turret_env --ipc=host

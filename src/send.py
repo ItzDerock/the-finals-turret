@@ -6,7 +6,7 @@ import time
 import math
 import os
 
-MOONRAKER_URL = os.getenv("MOONRAKER_URL")
+MOONRAKER_URL = os.getenv("MOONRAKER_WS_URL")
 STEPPER_MAPPER = {
     "x": "stepper_x",
     "y": "stepper_y",
@@ -58,7 +58,8 @@ def build_gcode_relative_move(axis: str, steps: float) -> str:
   # y = r*math.sin(math.radians(steps))
   # gcode_command = "G0 X" + str(x) + " Y" + str(y)
 
-  return f"G0 X{steps} F10000"
+  # return f"G0 X{steps} F10000"
+  return f"FORCE_MOVE STEPPER=stepper_x DISTANCE={steps} VELOCITY=50"
 
 # {x,y,z}{-,}{angle}
 def update_board(conn: connection.Connection):
@@ -81,34 +82,43 @@ def update_board(conn: connection.Connection):
       websocket = create_connection(MOONRAKER_URL)
 
       if not was_homed:
+        # Enable relative movements, and activate the motors
         websocket.send(build_klipper_ws_gcode_payload("""
-          SET_KINETIC_POSITION X=180 Y=0 Z=0
-          SET_VELOCITY_LIMIT 500
+          SET_KINEMATIC_POSITION X=500 Y=500 Z=180
+          G91
         """))
 
         was_homed = True
 
       while True:
         # Attempt to read a command from the connection
-        cmd: str = conn.recv()
+        cmd, *args = conn.recv().split(" ")
 
-        # parse that string
-        axes, angle = cmd[0], float(cmd[1:])
-        angle = float(cmd[1:])
+        if cmd == "move":
+            # parse that string
+            # axes, angle = cmd[0], float(cmd[1:])
+            # angle = float(cmd[1:])
+            z, xy = float(args[0]), float(args[1])
 
-        # build GCode
-        gcode = build_gcode_relative_move(axes, angle)
-        print(gcode)
+            # build GCode
+            # gcode = build_gcode_relative_move(axes, angle)
+            # gcode = f"G1 X{xy} Y{xy} Z{z} F10000"
+            gcode = f"G1 Z{z}"
+            print(gcode)
 
-        # send GCode
-        websocket.send(json.dumps({
-          "jsonrpc": "2.0",
-          "method": "printer.gcode.script",
-          "params": {
-              "script": gcode
-          },
-          "id": str(uuid4())
-        }))
+            # send GCode
+            websocket.send(build_klipper_ws_gcode_payload(gcode))
+        elif cmd == "shoot":
+            gcode = f"""
+                SET_SERVO SERVO=trigger ANGLE=180
+            """
+            # send GCode
+            websocket.send(build_klipper_ws_gcode_payload(gcode))
+        elif cmd == "noshoot":
+            websocket.send(build_klipper_ws_gcode_payload(
+                "SET_SERVO SERVO=trigger ANGLE=0"
+            ))
+
 
         time.sleep(0.01) # if only python was event-driven
     except BrokenPipeError:

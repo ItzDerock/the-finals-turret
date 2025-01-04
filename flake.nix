@@ -47,11 +47,15 @@
             qt5.qtwayland
             libGL
             opencv
+
+            onnxruntime
             python310Packages.numpy
             python310Packages.pyqt5
             python310Packages.opencv4
             python310Packages.torch-bin
             python310Packages.torchvision-bin
+            python310Packages.python-dotenv
+            python310Packages.onnxruntime
             python310
             coreutils
           ];
@@ -63,7 +67,8 @@
               websocket-client \
               ultralytics \
               PID_Py \
-              "lap>=0.5.12"
+              "lap>=0.5.12" \
+              rtmlib
           '';
 
           QT_PLUGIN_PATH = "${pkgs.qt5.qtwayland.bin}/lib/qt-${pkgs.qt5.qtwayland.version}/plugins";
