@@ -759,6 +759,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tmc2209"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2552dbf5901e37abcd381f930731432d2c952245fe277eadcf3e03ac438a2783"
+dependencies = [
+ "bitfield",
+ "embedded-hal 0.2.7",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -805,4 +815,5 @@ dependencies = [
  "embedded-io-async",
  "embedded-storage",
  "panic-probe",
+ "tmc2209",
 ]
