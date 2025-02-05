@@ -1,9 +1,8 @@
 use embassy_stm32::{
     gpio::{AnyPin, Level, Output, Speed},
     mode::Async,
-    usart::{BufferedUart, Error, Uart},
+    usart::{Error, Uart},
 };
-use embedded_io::{Read, Write};
 
 pub struct Motor<'d> {
     uart: &'d mut Uart<'d, Async>,

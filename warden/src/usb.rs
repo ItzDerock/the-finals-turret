@@ -57,7 +57,7 @@ impl USBController<'_> {
         Self { class, usb }
     }
 
-    pub async fn listen(&mut self) -> core::future::Future<(), ()> {
+    pub async fn listen(&mut self) -> dyn core::future::Future<Output = ()> {
         let usb_fut = self.usb.run();
         let listen_fut = async {
             loop {

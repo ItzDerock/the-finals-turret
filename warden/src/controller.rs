@@ -1,8 +1,5 @@
 use crate::{Irqs, Motor};
 use defmt::{error, info};
-use embassy_stm32::gpio::Pin;
-use embassy_stm32::mode::Async;
-use embassy_stm32::usart::BufferedUart;
 use embassy_stm32::{peripherals, usart::Uart};
 
 pub struct ControllerPeripherials {
@@ -45,13 +42,13 @@ impl Controller {
         tmc2209::send_write_request(0, tmc2209::reg::GCONF::default(), &mut uart);
 
         // init tmc driver
-        // let mut motor_x = Motor::new(
-        //     &mut uart,
-        //     2,
-        //     p.motor_x_step.degrade(), // step
-        //     p.motor_x_dir.degrade(),  // dir
-        //     p.motor_x_en.degrade(),   // en
-        // );
+        let mut motor_x = Motor::new(
+            &mut uart,
+            2,
+            p.motor_x_step.degrade(), // step
+            p.motor_x_dir.degrade(),  // dir
+            p.motor_x_en.degrade(),   // en
+        );
 
         if let Err(err) = motor_x.set_velocity(30) {
             error!("Error setting velocity: {:?}", err);
