@@ -5,14 +5,16 @@
     git
     openssl.dev # development requirement
     gcc-arm-embedded # for -objdump and other utils
+    probe-rs # for flashing and debugging
   ];
 
   languages.rust = {
     channel = "nightly";
     enable = true;
     targets = [
-      "thumbv7em-none-eabihf"
-      "x86_64-unknown-linux-gnu"
+      # "thumbv7em-none-eabihf"
+      "thumbv6m-none-eabi"
+      # "x86_64-unknown-linux-gnu"
     ];
 
     components = [

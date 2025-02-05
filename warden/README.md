@@ -18,3 +18,7 @@ On the SKR Mini E3 v3.0 board, you just move the firmware.bin to an SD card (MUS
 You will know the flashing is successful when the status LED stops blinking and the firmware file is renamed to FIRMWARE.CUR.
 
 Cannot just use `cargo build --release` as that generates an ELF file, which contains metadata that the bootloader does not understand.
+
+## Debug
+
+It is recommended that you have some sort of SWD debugger to debug the firmware.

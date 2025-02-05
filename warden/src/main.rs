@@ -1,22 +1,30 @@
 #![no_std]
 #![no_main]
 
+use controller::{Controller, ControllerPeripherials};
 use defmt::{panic, *};
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
-use embassy_stm32::usb::{Driver, Instance};
-use embassy_stm32::{bind_interrupts, peripherals, usb, Config};
-use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
+use embassy_stm32::gpio::{AnyPin, Level, Output, Pin, Speed};
+use embassy_stm32::wdg::IndependentWatchdog;
+use embassy_stm32::{bind_interrupts, peripherals, usart, usb as usb_interrupt, Config};
+use embassy_time::Timer;
 use embassy_usb::driver::EndpointError;
-use embassy_usb::Builder;
+use motor::Motor;
+use usb::{USBController, USBPeripherals};
 use {defmt_rtt as _, panic_probe as _};
 
+mod controller;
+mod motor;
+mod usb;
+
 bind_interrupts!(struct Irqs {
-    USB_UCPD1_2 => usb::InterruptHandler<peripherals::USB>;
+    USB_UCPD1_2 => usb_interrupt::InterruptHandler<peripherals::USB>;
+    USART3_4_5_6_LPUART1 => usart::InterruptHandler<peripherals::USART4>;
 });
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     let mut config = Config::default();
     {
         use embassy_stm32::rcc::*;
@@ -25,56 +33,80 @@ async fn main(_spawner: Spawner) {
         });
         config.rcc.mux.usbsel = mux::Usbsel::HSI48;
     }
-    let p = embassy_stm32::init(config);
+    let mut p = embassy_stm32::init(config);
+
+    // Enable the watchdog
+    let mut wdg = IndependentWatchdog::new(p.IWDG, 2_000_000);
 
     info!("Hello World!");
 
-    // Create the driver, from the HAL.
-    let driver = Driver::new(p.USB, Irqs, p.PA12, p.PA11);
+    // Flash the builtin LED on PD8
+    match spawner.spawn(flash_led(p.PD8.degrade())) {
+        Ok(_) => info!("Flash LED task spawned!"),
+        Err(_) => error!("Failed to spawn flash LED task!"),
+    }
 
-    // Create embassy-usb Config
-    let config = embassy_usb::Config::new(0xc0de, 0xcafe);
-    //config.max_packet_size_0 = 64;
-
-    // Create embassy-usb DeviceBuilder using the driver and config.
-    // It needs some buffers for building the descriptors.
-    let mut config_descriptor = [0; 256];
-    let mut bos_descriptor = [0; 256];
-    let mut control_buf = [0; 7];
-
-    let mut state = State::new();
-
-    let mut builder = Builder::new(
-        driver,
-        config,
-        &mut config_descriptor,
-        &mut bos_descriptor,
-        &mut [], // no msos descriptors
-        &mut control_buf,
-    );
-
-    // Create classes on the builder.
-    let mut class = CdcAcmClass::new(&mut builder, &mut state, 64);
-
-    // Build the builder.
-    let mut usb = builder.build();
-
-    // Run the USB device.
-    let usb_fut = usb.run();
-
-    // Do stuff with the class!
-    let echo_fut = async {
+    let wdg_fut = async {
         loop {
-            class.wait_connection().await;
-            info!("Connected");
-            let _ = echo(&mut class).await;
-            info!("Disconnected");
+            wdg.pet();
+            Timer::after_millis(1_000).await;
         }
     };
 
+    Controller::new(ControllerPeripherials {
+        usart4: p.USART4,
+        uart_rx: p.PC11,
+        uart_tx: p.PC10,
+        uart_dma_rx: p.DMA2_CH5,
+        uart_dma_tx: p.DMA2_CH3,
+        motor_x_step: p.PB13,
+        motor_x_dir: p.PB12,
+        motor_x_en: p.PB14,
+    });
+
+    let mut usb = USBController::new(USBPeripherals {
+        usb: p.USB,
+        usb_dp: p.PA12,
+        usb_dm: p.PA11,
+    });
+
+    let usb_fut = usb.listen();
+
+    // YEN PB11
+    // YSTP PB10
+    // YDIR PB2
+    // let mut motor_y = Motor::new(
+    //     &mut p.USART4,
+    //     3,
+    //     p.PC11, // rx
+    //     p.PC10, // tx
+    //     p.DMA2_CH5,
+    //     p.DMA2_CH3,
+    //     Irqs,
+    //     p.PB11.degrade(), // step
+    //     p.PB10.degrade(), // dir
+    //     p.PB2.degrade(),  // en
+    // );
+
+    // // ZEN PB1
+    // // ZSTP PB0
+    // // ZDIR PC5
+    // let mut motor_z = Motor::new(
+    //     &mut p.USART4,
+    //     4,
+    //     p.PC11, // rx
+    //     p.PC10, // tx
+    //     p.DMA2_CH5,
+    //     p.DMA2_CH3,
+    //     Irqs,
+    //     p.PB1.degrade(), // step
+    //     p.PB0.degrade(), // dir
+    //     p.PC5.degrade(), // en
+    // );
+
     // Run everything concurrently.
     // If we had made everything `'static` above instead, we could do this using separate tasks instead.
-    join(usb_fut, echo_fut).await;
+    join(usb_fut, wdg_fut).await;
 }
 
 struct Disconnected {}
@@ -88,14 +120,15 @@ impl From<EndpointError> for Disconnected {
     }
 }
 
-async fn echo<'d, T: Instance + 'd>(
-    class: &mut CdcAcmClass<'d, Driver<'d, T>>,
-) -> Result<(), Disconnected> {
-    let mut buf = [0; 64];
+// task to flash an LED
+#[embassy_executor::task(pool_size = 1)]
+async fn flash_led(p: AnyPin) {
+    let mut output = Output::new(p, Level::Low, Speed::Low);
+
     loop {
-        let n = class.read_packet(&mut buf).await?;
-        let data = &buf[..n];
-        info!("data: {:x}", data);
-        class.write_packet(data).await?;
+        output.set_low();
+        Timer::after_millis(1000).await;
+        output.set_high();
+        Timer::after_millis(1000).await;
     }
 }
