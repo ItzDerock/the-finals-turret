@@ -2,15 +2,18 @@
 #![no_main]
 
 use controller::{Controller, ControllerPeripherials};
-use defmt::{panic, *};
+use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_stm32::gpio::{AnyPin, Level, Output, Pin, Speed};
 use embassy_stm32::wdg::IndependentWatchdog;
-use embassy_stm32::{bind_interrupts, peripherals, usart, usb as usb_interrupt, Config};
+use embassy_stm32::{
+    bind_interrupts, peripherals, usart, usart::Uart, usb as usb_interrupt, Config,
+};
+use embassy_sync::mutex;
 use embassy_time::Timer;
-use embassy_usb::driver::EndpointError;
-use motor::Motor;
+use motor::{Motor, UartAsyncMutex};
+use static_cell::StaticCell;
 use usb::{USBController, USBPeripherals};
 use {defmt_rtt as _, panic_probe as _};
 
@@ -33,7 +36,7 @@ async fn main(spawner: Spawner) {
         });
         config.rcc.mux.usbsel = mux::Usbsel::HSI48;
     }
-    let mut p = embassy_stm32::init(config);
+    let p = embassy_stm32::init(config);
 
     // Enable the watchdog
     let mut wdg = IndependentWatchdog::new(p.IWDG, 2_000_000);
@@ -53,16 +56,47 @@ async fn main(spawner: Spawner) {
         }
     };
 
-    Controller::new(ControllerPeripherials {
-        usart4: p.USART4,
-        uart_rx: p.PC11,
-        uart_tx: p.PC10,
-        uart_dma_rx: p.DMA2_CH5,
-        uart_dma_tx: p.DMA2_CH3,
+    // Initialize USART4
+    // RX4: PC11
+    // TX4: PC10
+    let mut uart_config = embassy_stm32::usart::Config::default();
+    uart_config.baudrate = 115200;
+    let mut uart = Uart::new(
+        p.USART4,
+        p.PC11,
+        p.PC10,
+        Irqs,
+        p.DMA2_CH5,
+        p.DMA2_CH3,
+        uart_config,
+    )
+    .unwrap();
+
+    static UART: StaticCell<UartAsyncMutex> = StaticCell::new();
+    let uart = UART.init(mutex::Mutex::new(uart));
+
+    let mut controller = Controller::new(ControllerPeripherials {
+        uart,
+
+        // MS0: GND, MS1: GND
+        motor_x_address: 0b00,
         motor_x_step: p.PB13,
         motor_x_dir: p.PB12,
         motor_x_en: p.PB14,
-    });
+
+        // MS0: GND, MS1: 3.3V
+        motor_y_address: 0b01,
+        motor_y_step: p.PB11,
+        motor_y_dir: p.PB10,
+        motor_y_en: p.PB2,
+
+        // MS0: 3.3V, MS1: GND
+        motor_z_address: 0b10,
+        motor_z_step: p.PB1,
+        motor_z_dir: p.PB0,
+        motor_z_en: p.PC5,
+    })
+    .await;
 
     let mut usb = USBController::new(USBPeripherals {
         usb: p.USB,
@@ -71,6 +105,10 @@ async fn main(spawner: Spawner) {
     });
 
     let usb_fut = usb.listen();
+    let read_loop_fut = controller.motor_x.read_loop();
+
+    controller.motor_x.set_velocity(5000).await;
+    info!("Velocity set!");
 
     // YEN PB11
     // YSTP PB10
@@ -106,18 +144,7 @@ async fn main(spawner: Spawner) {
 
     // Run everything concurrently.
     // If we had made everything `'static` above instead, we could do this using separate tasks instead.
-    join(usb_fut, wdg_fut).await;
-}
-
-struct Disconnected {}
-
-impl From<EndpointError> for Disconnected {
-    fn from(val: EndpointError) -> Self {
-        match val {
-            EndpointError::BufferOverflow => panic!("Buffer overflow"),
-            EndpointError::Disabled => Disconnected {},
-        }
-    }
+    join(usb_fut, join(wdg_fut, read_loop_fut)).await;
 }
 
 // task to flash an LED

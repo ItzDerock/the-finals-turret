@@ -1,61 +1,66 @@
-use crate::{Irqs, Motor};
+use crate::{motor::UartAsyncMutex, Motor};
 use defmt::{error, info};
-use embassy_stm32::{peripherals, usart::Uart};
+use embassy_stm32::{gpio::Pin, mode::Async, peripherals, usart::Uart};
 
 pub struct ControllerPeripherials {
-    pub usart4: peripherals::USART4,
-    pub uart_rx: peripherals::PC11,
-    pub uart_tx: peripherals::PC10,
-    pub uart_dma_rx: peripherals::DMA2_CH5,
-    pub uart_dma_tx: peripherals::DMA2_CH3,
+    pub uart: &'static UartAsyncMutex,
 
+    pub motor_x_address: u8,
     pub motor_x_step: peripherals::PB13,
     pub motor_x_dir: peripherals::PB12,
     pub motor_x_en: peripherals::PB14,
+
+    pub motor_y_address: u8,
+    pub motor_y_step: peripherals::PB11,
+    pub motor_y_dir: peripherals::PB10,
+    pub motor_y_en: peripherals::PB2,
+
+    pub motor_z_address: u8,
+    pub motor_z_step: peripherals::PB1,
+    pub motor_z_dir: peripherals::PB0,
+    pub motor_z_en: peripherals::PC5,
 }
 
-pub struct Controller {
-    uart: Uart<'static, embassy_stm32::mode::Async>,
-    motor_x: Motor<'static>,
-    // motor_y: Motor<'static>,
-    // motor_z: Motor<'static>,
+pub struct Controller<'d> {
+    pub motor_x: Motor<'d>,
+    pub motor_y: Motor<'d>,
+    pub motor_z: Motor<'d>,
 }
 
-impl Controller {
-    pub fn new(mut p: ControllerPeripherials) -> Self {
-        // Initialize USART4
-        // RX4: PC11
-        // TX4: PC10
-        let mut uart_config = embassy_stm32::usart::Config::default();
-        uart_config.baudrate = 115200;
-        let mut uart = Uart::new(
-            p.usart4,
-            p.uart_rx,
-            p.uart_tx,
-            Irqs,
-            p.uart_dma_rx,
-            p.uart_dma_tx,
-            uart_config,
-        )
-        .unwrap();
-
-        tmc2209::send_write_request(0, tmc2209::reg::GCONF::default(), &mut uart);
-
+impl<'d> Controller<'d> {
+    pub async fn new(p: ControllerPeripherials) -> Self {
         // init tmc driver
         let mut motor_x = Motor::new(
-            &mut uart,
-            2,
+            p.uart,
+            p.motor_x_address,
             p.motor_x_step.degrade(), // step
             p.motor_x_dir.degrade(),  // dir
             p.motor_x_en.degrade(),   // en
-        );
+        )
+        .await;
 
-        if let Err(err) = motor_x.set_velocity(30) {
-            error!("Error setting velocity: {:?}", err);
+        let mut motor_y = Motor::new(
+            p.uart,
+            p.motor_y_address,
+            p.motor_y_step.degrade(), // step
+            p.motor_y_dir.degrade(),  // dir
+            p.motor_y_en.degrade(),   // en
+        )
+        .await;
+
+        let mut motor_z = Motor::new(
+            p.uart,
+            p.motor_z_address,
+            p.motor_z_step.degrade(), // step
+            p.motor_z_dir.degrade(),  // dir
+            p.motor_z_en.degrade(),   // en
+        )
+        .await;
+
+        Self {
+            motor_x,
+            motor_y,
+            motor_z,
         }
-
-        info!("Velocity set!");
-
-        Self { uart, motor_x }
     }
 }

@@ -42,9 +42,13 @@ embassy-stm32 = { version = "0.2.0", features = [
   "time-driver-any",
   "exti",
 ] }
-embassy-usb = { version = "0.4.0", default-features = false, features = ["defmt"] }
+embassy-usb = { version = "0.4.0", default-features = false, features = [
+  "defmt",
+] }
 embassy-futures = { version = "0.1.1", features = ["defmt"] }
-tmc2209 = { git = "https://github.com/mitchmindtree/tmc2209", version = "0.2.2" }
+tmc2209 = { git = "https://github.com/mitchmindtree/tmc2209", version = "0.2.2", features = ["ufmt"] }
+static_cell = { version = "2.1.0" }
+portable-atomic = { version = "1.10.0", features = ["critical-section"] }
 
 [profile.release]
 debug = 2
