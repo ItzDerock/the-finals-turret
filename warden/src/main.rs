@@ -10,14 +10,17 @@ use embassy_stm32::wdg::IndependentWatchdog;
 use embassy_stm32::{
     bind_interrupts, peripherals, usart, usart::Uart, usb as usb_interrupt, Config,
 };
-use embassy_sync::mutex;
 use embassy_time::Timer;
 use motor::{Motor, UartAsyncMutex};
 use static_cell::StaticCell;
 use usb::{USBController, USBPeripherals};
 use {defmt_rtt as _, panic_probe as _};
 
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex};
+pub type ControllerMutex = mutex::Mutex<CriticalSectionRawMutex, Controller<'static>>;
+
 mod controller;
+mod decoder;
 mod motor;
 mod usb;
 
@@ -98,53 +101,21 @@ async fn main(spawner: Spawner) {
     })
     .await;
 
+    static CONTROLLER: StaticCell<ControllerMutex> = StaticCell::new();
+    let controller = CONTROLLER.init(mutex::Mutex::new(controller));
+
     let mut usb = USBController::new(USBPeripherals {
+        controller,
         usb: p.USB,
         usb_dp: p.PA12,
         usb_dm: p.PA11,
     });
 
     let usb_fut = usb.listen();
-    let read_loop_fut = controller.motor_x.read_loop();
-
-    controller.motor_x.set_velocity(5000).await;
-    info!("Velocity set!");
-
-    // YEN PB11
-    // YSTP PB10
-    // YDIR PB2
-    // let mut motor_y = Motor::new(
-    //     &mut p.USART4,
-    //     3,
-    //     p.PC11, // rx
-    //     p.PC10, // tx
-    //     p.DMA2_CH5,
-    //     p.DMA2_CH3,
-    //     Irqs,
-    //     p.PB11.degrade(), // step
-    //     p.PB10.degrade(), // dir
-    //     p.PB2.degrade(),  // en
-    // );
-
-    // // ZEN PB1
-    // // ZSTP PB0
-    // // ZDIR PC5
-    // let mut motor_z = Motor::new(
-    //     &mut p.USART4,
-    //     4,
-    //     p.PC11, // rx
-    //     p.PC10, // tx
-    //     p.DMA2_CH5,
-    //     p.DMA2_CH3,
-    //     Irqs,
-    //     p.PB1.degrade(), // step
-    //     p.PB0.degrade(), // dir
-    //     p.PC5.degrade(), // en
-    // );
 
     // Run everything concurrently.
     // If we had made everything `'static` above instead, we could do this using separate tasks instead.
-    join(usb_fut, join(wdg_fut, read_loop_fut)).await;
+    join(usb_fut, wdg_fut).await;
 }
 
 // task to flash an LED

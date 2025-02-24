@@ -1,5 +1,6 @@
 use crate::controller::Controller;
-use crate::Irqs;
+use crate::{decoder, ControllerMutex, Irqs};
+use core::borrow::{Borrow, BorrowMut};
 use defmt::{info, panic, Format};
 use embassy_futures::join::join;
 use embassy_stm32::peripherals::{PA11, PA12, USB};
@@ -10,6 +11,7 @@ use embassy_usb::{Builder, UsbDevice};
 use static_cell::StaticCell;
 
 pub struct USBPeripherals {
+    pub controller: &'static ControllerMutex,
     pub usb: USB,
     pub usb_dp: PA12,
     pub usb_dm: PA11,
@@ -18,6 +20,7 @@ pub struct USBPeripherals {
 pub struct USBController {
     class: CdcAcmClass<'static, Driver<'static, USB>>,
     usb: UsbDevice<'static, Driver<'static, USB>>,
+    controller: &'static ControllerMutex,
 }
 
 static STATE: StaticCell<State> = StaticCell::new();
@@ -67,19 +70,24 @@ impl USBController {
         // Build the USB device.
         let usb = builder.build();
 
-        Self { class, usb }
+        Self {
+            class,
+            usb,
+            controller: p.controller,
+        }
     }
 
     pub async fn listen(&mut self) {
         let usb = &mut self.usb;
         let class = &mut self.class;
+        let controller = self.controller;
 
         let usb_fut = usb.run();
         let listen_fut = async {
             loop {
                 class.wait_connection().await;
                 info!("Connected");
-                if let Err(e) = USBController::receive(class).await {
+                if let Err(e) = USBController::receive(controller, class).await {
                     defmt::warn!("Receive error: {:?}", e);
                 }
                 info!("Disconnected");
@@ -90,6 +98,7 @@ impl USBController {
     }
 
     async fn receive(
+        controller: &ControllerMutex,
         class: &mut CdcAcmClass<'static, Driver<'static, USB>>,
     ) -> Result<(), Disconnected> {
         let mut buf = [0u8; 64];
@@ -113,6 +122,7 @@ impl USBController {
             let (_valid, remaining) = match core::str::from_utf8(&utf8_buf[..buf_len]) {
                 Ok(s) => {
                     info!("Received: {}", s);
+                    USBController::execute_command(s, controller).await;
                     (s.len(), 0)
                 }
                 Err(e) => {
@@ -120,6 +130,7 @@ impl USBController {
                     if valid_len > 0 {
                         if let Ok(s) = core::str::from_utf8(&utf8_buf[..valid_len]) {
                             info!("Received: {}", s);
+                            USBController::execute_command(s, controller).await;
                         }
                     }
                     // Calculate the number of bytes remaining that could be part of a valid sequence.
@@ -133,6 +144,32 @@ impl USBController {
                 utf8_buf.copy_within(buf_len - remaining..buf_len, 0);
             }
             buf_len = remaining;
+        }
+    }
+
+    pub async fn execute_command(message: &str, controller: &ControllerMutex) {
+        match decoder::decode(message) {
+            Ok(decoder::Message::Speed(speed)) => match speed.axis {
+                decoder::MotorAxis::Pan => {
+                    controller
+                        .lock()
+                        .await
+                        .motor_x
+                        .set_velocity(speed.velocity)
+                        .await;
+                }
+                decoder::MotorAxis::Tilt => {
+                    let mut controller = controller.lock().await;
+                    controller.motor_y.set_velocity(speed.velocity).await;
+                    controller.motor_z.set_velocity(speed.velocity).await;
+                }
+            },
+            Ok(decoder::Message::Stop(axis)) => {
+                info!("Stop: {:?}", axis);
+            }
+            Err(e) => {
+                defmt::warn!("Error decoding message: {:?}", e);
+            }
         }
     }
 }

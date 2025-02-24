@@ -126,14 +126,14 @@ impl<'d> Motor<'d> {
     }
 
     pub fn read_loop(&self) -> impl Future<Output = ()> {
-        let mut uart = self.uart;
+        let uart = self.uart;
 
         async {
             // read forever
             let mut buffer = [0u8; 64];
             let mut reader = Reader::default();
 
-            while let Ok(b) = uart.lock().await.read(&mut buffer).await {
+            while let Ok(_b) = uart.lock().await.read(&mut buffer).await {
                 if let (_, Some(response)) = reader.read_response(&buffer) {
                     match response.crc_is_valid() {
                         true => defmt::info!("Received valid response!"),
@@ -155,7 +155,7 @@ impl<'d> Motor<'d> {
                         Ok(addr) => {
                             defmt::info!("Addr: 0x{:X}", addr as u8);
                         }
-                        Err(err) => {
+                        Err(_err) => {
                             defmt::warn!("Error reading register address")
                         }
                     }

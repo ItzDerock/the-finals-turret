@@ -6,6 +6,7 @@
     openssl.dev # development requirement
     gcc-arm-embedded # for -objdump and other utils
     probe-rs # for flashing and debugging
+    protobuf # messaging protocol
   ];
 
   languages.rust = {
