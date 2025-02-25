@@ -1,24 +1,30 @@
 use crate::{motor::UartAsyncMutex, Motor};
 use defmt::{error, info};
-use embassy_stm32::{gpio::Pin, mode::Async, peripherals, usart::Uart};
+use embassy_executor::SendSpawner;
+use embassy_stm32::{
+    gpio::{AnyPin, Pin},
+    mode::Async,
+    peripherals,
+    usart::Uart,
+};
 
 pub struct ControllerPeripherials {
     pub uart: &'static UartAsyncMutex,
 
     pub motor_x_address: u8,
-    pub motor_x_step: peripherals::PB13,
-    pub motor_x_dir: peripherals::PB12,
-    pub motor_x_en: peripherals::PB14,
+    pub motor_x_step: AnyPin,
+    pub motor_x_dir: AnyPin,
+    pub motor_x_en: AnyPin,
 
     pub motor_y_address: u8,
-    pub motor_y_step: peripherals::PB11,
-    pub motor_y_dir: peripherals::PB10,
-    pub motor_y_en: peripherals::PB2,
+    pub motor_y_step: AnyPin,
+    pub motor_y_dir: AnyPin,
+    pub motor_y_en: AnyPin,
 
     pub motor_z_address: u8,
-    pub motor_z_step: peripherals::PB1,
-    pub motor_z_dir: peripherals::PB0,
-    pub motor_z_en: peripherals::PC5,
+    pub motor_z_step: AnyPin,
+    pub motor_z_dir: AnyPin,
+    pub motor_z_en: AnyPin,
 }
 
 pub struct Controller<'d> {
@@ -28,7 +34,7 @@ pub struct Controller<'d> {
 }
 
 impl<'d> Controller<'d> {
-    pub async fn new(p: ControllerPeripherials) -> Self {
+    pub async fn new(p: ControllerPeripherials, spawner: SendSpawner) -> Self {
         // init tmc driver
         let mut motor_x = Motor::new(
             p.uart,
@@ -56,6 +62,11 @@ impl<'d> Controller<'d> {
             p.motor_z_en.degrade(),   // en
         )
         .await;
+
+        match (spawner.spawn(crate::motor::read_loop(p.uart))) {
+            Ok(_) => info!("Spawned read loop"),
+            Err(_) => error!("Failed to spawn read loop"),
+        }
 
         Self {
             motor_x,

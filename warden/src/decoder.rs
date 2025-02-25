@@ -50,8 +50,12 @@ impl Format for DecodeError {
  */
 pub fn decode(message: &str) -> Result<Message, DecodeError> {
     let mut chars = message.chars();
-    let command = chars.next().unwrap();
-    let axis_index = chars.next().unwrap().to_digit(10).unwrap();
+    let command = chars.next().ok_or(DecodeError::InvalidAxis)?;
+    let axis_index = chars
+        .next()
+        .ok_or(DecodeError::InvalidAxis)?
+        .to_digit(10)
+        .ok_or(DecodeError::InvalidAxis)?;
     let axis = match axis_index {
         0 => MotorAxis::Pan,
         1 => MotorAxis::Tilt,

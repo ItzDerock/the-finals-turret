@@ -78,27 +78,30 @@ async fn main(spawner: Spawner) {
     static UART: StaticCell<UartAsyncMutex> = StaticCell::new();
     let uart = UART.init(mutex::Mutex::new(uart));
 
-    let mut controller = Controller::new(ControllerPeripherials {
-        uart,
+    let mut controller = Controller::new(
+        ControllerPeripherials {
+            uart,
 
-        // MS0: GND, MS1: GND
-        motor_x_address: 0b00,
-        motor_x_step: p.PB13,
-        motor_x_dir: p.PB12,
-        motor_x_en: p.PB14,
+            // MS0: GND, MS1: GND
+            motor_x_address: 0b00,
+            motor_x_step: p.PB13.degrade(),
+            motor_x_dir: p.PB12.degrade(),
+            motor_x_en: p.PB14.degrade(),
 
-        // MS0: GND, MS1: 3.3V
-        motor_y_address: 0b01,
-        motor_y_step: p.PB11,
-        motor_y_dir: p.PB10,
-        motor_y_en: p.PB2,
+            // MS0: GND, MS1: 3.3V
+            motor_y_address: 0b01,
+            motor_y_step: p.PB10.degrade(),
+            motor_y_dir: p.PB2.degrade(),
+            motor_y_en: p.PB11.degrade(),
 
-        // MS0: 3.3V, MS1: GND
-        motor_z_address: 0b10,
-        motor_z_step: p.PB1,
-        motor_z_dir: p.PB0,
-        motor_z_en: p.PC5,
-    })
+            // MS0: 3.3V, MS1: GND
+            motor_z_address: 0b10,
+            motor_z_step: p.PB0.degrade(),
+            motor_z_dir: p.PC5.degrade(),
+            motor_z_en: p.PB1.degrade(),
+        },
+        spawner.make_send(),
+    )
     .await;
 
     static CONTROLLER: StaticCell<ControllerMutex> = StaticCell::new();

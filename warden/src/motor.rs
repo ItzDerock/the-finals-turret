@@ -4,6 +4,7 @@ use core::{
     future::Future,
 };
 
+use defmt::debug;
 use embassy_stm32::{
     gpio::{AnyPin, Level, Output, Speed},
     mode::Async,
@@ -81,6 +82,8 @@ impl<'d> Motor<'d> {
 
         enable_pin.set_low();
 
+        defmt::info!("Initialized motor on uart {:08b} ", uart_address);
+
         Self {
             uart,
             uart_address,
@@ -124,50 +127,48 @@ impl<'d> Motor<'d> {
             defmt::info!("VACTUAL: {:?}", drvstat.unwrap());
         }
     }
-
-    pub fn read_loop(&self) -> impl Future<Output = ()> {
-        let uart = self.uart;
-
-        async {
-            // read forever
-            let mut buffer = [0u8; 64];
-            let mut reader = Reader::default();
-
-            while let Ok(_b) = uart.lock().await.read(&mut buffer).await {
-                if let (_, Some(response)) = reader.read_response(&buffer) {
-                    match response.crc_is_valid() {
-                        true => defmt::info!("Received valid response!"),
-                        false => {
-                            defmt::error!("Received invalid response!");
-                            continue;
-                        }
-                    }
-
-                    match response.reg_addr() {
-                        Ok(tmc2209::reg::Address::IFCNT) => {
-                            // let reg = response.register::<tmc2209::reg::IFCNT>().unwrap();
-                            // Format not implemented for `tmc2209::reg::IFCNT`
-                            // so need to print the value directly
-                            let bytes = response.bytes();
-
-                            defmt::info!("IFCNT: 0b{:08b}", bytes[0]);
-                        }
-                        Ok(addr) => {
-                            defmt::info!("Addr: 0x{:X}", addr as u8);
-                        }
-                        Err(_err) => {
-                            defmt::warn!("Error reading register address")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // pub async fn move_steps(&mut self, steps: i32) {
     //     let mut step = tmc2209::reg::TSTEP::default();
     //     step.
 
     //     self.write_register(step).await.unwrap();
     // }
+}
+
+#[embassy_executor::task(pool_size = 1)]
+pub async fn read_loop(uart: &'static UartAsyncMutex) -> ! {
+    // read forever
+    let mut buffer = [0u8; 64];
+    let mut reader = Reader::default();
+
+    loop {
+        while let Ok(_b) = uart.lock().await.read(&mut buffer).await {
+            if let (_, Some(response)) = reader.read_response(&buffer) {
+                match response.crc_is_valid() {
+                    true => defmt::info!("Received valid response!"),
+                    false => {
+                        defmt::error!("Received invalid response!");
+                        continue;
+                    }
+                }
+
+                match response.reg_addr() {
+                    Ok(tmc2209::reg::Address::IFCNT) => {
+                        // let reg = response.register::<tmc2209::reg::IFCNT>().unwrap();
+                        // Format not implemented for `tmc2209::reg::IFCNT`
+                        // so need to print the value directly
+                        let bytes = response.bytes();
+
+                        defmt::info!("IFCNT: 0b{:08b}", bytes[0]);
+                    }
+                    Ok(addr) => {
+                        defmt::info!("Addr: 0x{:X}", addr as u8);
+                    }
+                    Err(_err) => {
+                        defmt::warn!("Error reading register address")
+                    }
+                }
+            }
+        }
+    }
 }

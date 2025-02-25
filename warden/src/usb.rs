@@ -148,6 +148,11 @@ impl USBController {
     }
 
     pub async fn execute_command(message: &str, controller: &ControllerMutex) {
+        // ignore empty lines or lines that only contain \n
+        if message.trim().is_empty() {
+            return;
+        }
+
         match decoder::decode(message) {
             Ok(decoder::Message::Speed(speed)) => match speed.axis {
                 decoder::MotorAxis::Pan => {
