@@ -5,23 +5,30 @@ use controller::{Controller, ControllerPeripherials};
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
-use embassy_stm32::gpio::{AnyPin, Level, Output, Pin, Speed};
+use embassy_stm32::gpio::{AnyPin, Level, Output, OutputType, Pin, Speed};
+use embassy_stm32::peripherals::TIM16;
+use embassy_stm32::time::Hertz;
+use embassy_stm32::timer::low_level::CountingMode;
+use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm, SimplePwmChannel};
 use embassy_stm32::wdg::IndependentWatchdog;
 use embassy_stm32::{
     bind_interrupts, peripherals, usart, usart::Uart, usb as usb_interrupt, Config,
 };
 use embassy_time::Timer;
+use embedded_hal::pwm::SetDutyCycle;
 use motor::{Motor, UartAsyncMutex};
+use servo::Servo;
 use static_cell::StaticCell;
 use usb::{USBController, USBPeripherals};
 use {defmt_rtt as _, panic_probe as _};
 
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex};
-pub type ControllerMutex = mutex::Mutex<CriticalSectionRawMutex, Controller<'static>>;
+pub type ControllerMutex = mutex::Mutex<CriticalSectionRawMutex, Controller<'static, TIM16>>;
 
 mod controller;
 mod decoder;
 mod motor;
+mod servo;
 mod usb;
 
 bind_interrupts!(struct Irqs {
@@ -78,6 +85,49 @@ async fn main(spawner: Spawner) {
     static UART: StaticCell<UartAsyncMutex> = StaticCell::new();
     let uart = UART.init(mutex::Mutex::new(uart));
 
+    // First define the static for the PWM peripheral
+    static PWM: StaticCell<SimplePwm<TIM16>> = StaticCell::new();
+
+    // Create and initialize the PWM peripheral inside the static
+    let servo_pin = PwmPin::new_ch1(p.PD0, OutputType::PushPull);
+    let pwm = PWM.init(SimplePwm::new(
+        p.TIM16,
+        Some(servo_pin),
+        None,
+        None,
+        None,
+        Hertz(50_000),
+        CountingMode::EdgeAlignedUp,
+    ));
+
+    // Now we can get the channel from the static PWM
+    static SERVO_PWM: StaticCell<SimplePwmChannel<'static, TIM16>> = StaticCell::new();
+    let servo_pwm = SERVO_PWM.init(pwm.ch4());
+
+    // Initialize the servo with the static PWM channel
+    static SERVO: StaticCell<Servo<'static, TIM16>> = StaticCell::new();
+    let servo = SERVO.init(Servo::new(servo_pwm)); // init pwm for servo control
+
+    // let servo_pin = PwmPin::new_ch1(p.PD0, OutputType::PushPull);
+    // let mut servo_pwm = SimplePwm::new(
+    //     p.TIM16,
+    //     Some(servo_pin),
+    //     None,
+    //     None,
+    //     None,
+    //     Hertz(50_000),
+    //     CountingMode::EdgeAlignedUp,
+    // );
+
+    // static SERVO: StaticCell<Servo<'static, TIM16>> = StaticCell::new();
+
+    // // Extract the channel before the original pwm is dropped
+    // let ch4 = temp_pwm.ch4();
+    // static SERVO_PWM: StaticCell<SimplePwmChannel<'static, TIM16>> = StaticCell::new();
+    // let mut servo_pwm = SERVO_PWM.init(ch4);
+
+    // let servo = SERVO.init(Servo::new(servo_pwm));
+
     let mut controller = Controller::new(
         ControllerPeripherials {
             uart,
@@ -99,6 +149,8 @@ async fn main(spawner: Spawner) {
             motor_z_step: p.PB0.degrade(),
             motor_z_dir: p.PC5.degrade(),
             motor_z_en: p.PB1.degrade(),
+
+            trigger_servo: servo,
         },
         spawner.make_send(),
     )

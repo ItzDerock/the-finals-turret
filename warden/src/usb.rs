@@ -148,8 +148,10 @@ impl USBController {
     }
 
     pub async fn execute_command(message: &str, controller: &ControllerMutex) {
+        let message = message.trim();
+
         // ignore empty lines or lines that only contain \n
-        if message.trim().is_empty() {
+        if message.is_empty() {
             return;
         }
 
@@ -166,11 +168,19 @@ impl USBController {
                 decoder::MotorAxis::Tilt => {
                     let mut controller = controller.lock().await;
                     controller.motor_y.set_velocity(speed.velocity).await;
-                    controller.motor_z.set_velocity(speed.velocity).await;
+                    controller.motor_z.set_velocity(-1 * speed.velocity).await;
                 }
             },
             Ok(decoder::Message::Stop(axis)) => {
                 info!("Stop: {:?}", axis);
+            }
+            Ok(decoder::Message::Trigger(status)) => {
+                info!("Trigger: {:?}", status);
+                controller
+                    .lock()
+                    .await
+                    .trigger_servo
+                    .set_position(if status { 180 } else { 0 });
             }
             Err(e) => {
                 defmt::warn!("Error decoding message: {:?}", e);

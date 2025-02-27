@@ -16,6 +16,7 @@ pub struct MotorSpeed {
 pub enum Message {
     Speed(MotorSpeed),
     Stop(MotorAxis),
+    Trigger(bool),
 }
 
 #[derive(Debug)]
@@ -23,6 +24,7 @@ pub enum DecodeError {
     InvalidCommand,
     InvalidAxis,
     InvalidInteger,
+    InvalidArgument, // generic
 }
 
 impl From<ParseIntError> for DecodeError {
@@ -37,6 +39,7 @@ impl Format for DecodeError {
             DecodeError::InvalidCommand => defmt::write!(fmt, "Invalid command"),
             DecodeError::InvalidAxis => defmt::write!(fmt, "Invalid axis"),
             DecodeError::InvalidInteger => defmt::write!(fmt, "Invalid integer"),
+            DecodeError::InvalidArgument => defmt::write!(fmt, "Invalid argument"),
         }
     }
 }
@@ -51,6 +54,16 @@ impl Format for DecodeError {
 pub fn decode(message: &str) -> Result<Message, DecodeError> {
     let mut chars = message.chars();
     let command = chars.next().ok_or(DecodeError::InvalidAxis)?;
+
+    if (command == 't') {
+        let trigger = chars
+            .as_str()
+            .parse::<bool>()
+            .map_err(|_| DecodeError::InvalidArgument)?;
+
+        return Ok(Message::Trigger(trigger));
+    }
+
     let axis_index = chars
         .next()
         .ok_or(DecodeError::InvalidAxis)?
