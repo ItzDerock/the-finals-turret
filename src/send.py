@@ -19,27 +19,36 @@ def steps_needed(delta_angle: float, step_angle: float, driven_teeth: float, dri
   steps = delta_angle / degrees_per_step_driven
   return steps
 
-def build_klipper_ws_gcode_payload(gcode: str, id: str | None = None) -> str:
+def build_klipper_ws_payload(method: str, data: dict, id: str | None = None) -> str:
+  """
+  Builds a JSON-RPC payload
+  """
   return json.dumps({
     "jsonrpc": "2.0",
     "method": "printer.gcode.script",
-    "params": {
-      "script": gcode
-    },
+    "params": data,
     "id": id or str(uuid4())
   })
 
-def build_gcode_relative_move(axis: str, steps: float) -> str:
-  if axis not in STEPPER_MAPPER:
-    raise ValueError("Stepper must be either 'x', 'y', or 'z'")
-  return f"FORCE_MOVE STEPPER=stepper_x DISTANCE={steps} VELOCITY=100"
+def build_klipper_ws_gcode_payload(gcode: str, id: str | None = None) -> str:
+  """
+  Build a JSON-RPC payload for sending G-code commands to Klipper
+  """
+  return build_klipper_ws_payload(
+    "printer.gcode.script",
+    {"script": gcode},
+    id
+  )
 
 class KlipperWebSocketClient:
-  def __init__(self):
+  def __init__(self, absolute_positioning=False):
     self.was_homed = False
     self.ws = None
+    self.absolute_positioning = absolute_positioning
 
   def on_message(self, ws, message):
+    # Parse JSON message
+
     pass
     # print(f"Received message: {message}")
 
@@ -54,8 +63,7 @@ class KlipperWebSocketClient:
     if not self.was_homed:
       gcode = """
         SET_KINEMATIC_POSITION X=500 Y=500 Z=180
-        G91
-        G1 X2 Y2
+        G1 X501 Y501 Z181 F10000
       """
       ws.send(build_klipper_ws_gcode_payload(gcode))
       self.was_homed = True
@@ -68,12 +76,16 @@ class KlipperWebSocketClient:
 
         if cmd == "move":
           z, xy = float(args[0]), float(args[1])
-          gcode = f"FORCE_MOVE STEPPER=stepper_z DISTANCE={z} VELOCITY=50"
+          if self.absolute_positioning:
+            gcode = f"G0 Z{z} F{xy}"
+          else:
+            gcode = f"FORCE_MOVE STEPPER=stepper_z DISTANCE={z} VELOCITY=50"
         elif cmd == "shoot":
           gcode = f"SET_SERVO SERVO=trigger ANGLE=180"
         elif cmd == "noshoot":
           gcode = "SET_SERVO SERVO=trigger ANGLE=0"
 
+        print(gcode)
         self.ws.send(build_klipper_ws_gcode_payload(gcode))
 
         time.sleep(0.01)
@@ -91,7 +103,8 @@ class KlipperWebSocketClient:
     )
 
     # Run forever in separate thread
-    # self.ws.run_forever(reconnect=0)
     self.wst = Thread(target=self.ws.run_forever, kwargs={"reconnect": 0})
     self.wst.start()
-    self.update_board()
+
+    self.updatet = Thread(target=self.update_board)
+    self.updatet.start()

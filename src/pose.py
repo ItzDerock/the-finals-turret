@@ -19,7 +19,7 @@ from multiprocessing import Process, Pipe
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Configurations
-CENTER_THRESHOLD = 60 # Pixels for center threshold
+CENTER_THRESHOLD = 200 # Pixels for center threshold
 NO_DETECTION_TIMEOUT = 2  # Seconds before switching target
 
 cap = cv2.VideoCapture(options.video)
