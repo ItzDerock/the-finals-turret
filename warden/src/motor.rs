@@ -57,6 +57,7 @@ impl<'d> Motor<'d> {
         let mut chopconf = tmc2209::reg::CHOPCONF::default();
         // chopconf.set_t
 
+        // let board crash (unwrap) if init fails, can't easily recover
         let mut guard = uart.lock().await;
         let mut uart_mut = guard.borrow_mut();
         {
@@ -103,30 +104,28 @@ impl<'d> Motor<'d> {
         let mut uart_mut = guard.borrow_mut();
         {
             let uart_mut: &mut Uart<'static, embassy_stm32::mode::Async> = &mut *guard;
-            tmc2209::send_write_request(self.uart_address, register, uart_mut).unwrap();
+            tmc2209::send_write_request(self.uart_address, register, uart_mut)?;
             uart_mut.flush().await
         }
     }
 
-    pub async fn set_velocity(&mut self, velocity: i32) {
-        let mut vactual = tmc2209::reg::VACTUAL::default();
-        vactual.set(velocity);
-
-        self.write_register(vactual).await.unwrap();
+    pub async fn set_velocity(&mut self, velocity: i32) -> Result<(), Error> {
+        self.regs.vactual.set(velocity);
+        self.write_register(self.regs.vactual).await
 
         // read and print to debug
-        let mut guard = self.uart.lock().await;
-        let mut uart_mut = guard.borrow_mut();
-        {
-            let uart_mut: &mut Uart<'static, embassy_stm32::mode::Async> = &mut *guard;
-            let drvstat = tmc2209::send_read_request::<
-                tmc2209::reg::DRV_STATUS,
-                Uart<'static, Async>,
-            >(self.uart_address, uart_mut);
-
-            defmt::info!("VACTUAL: {:?}", drvstat.unwrap());
-        }
+        // let mut guard = self.uart.lock().await;
+        // let mut uart_mut = guard.borrow_mut();
+        // {
+        //     let uart_mut: &mut Uart<'static, embassy_stm32::mode::Async> = &mut *guard;
+        //     tmc2209::send_read_request::<
+        //         tmc2209::reg::DRV_STATUS,
+        //         Uart<'static, Async>,
+        //     >(self.uart_address, uart_mut);
+        // }
+        // Ok(())
     }
+
     // pub async fn move_steps(&mut self, steps: i32) {
     //     let mut step = tmc2209::reg::TSTEP::default();
     //     step.

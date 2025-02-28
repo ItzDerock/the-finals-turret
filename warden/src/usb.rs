@@ -155,36 +155,44 @@ impl USBController {
             return;
         }
 
-        match decoder::decode(message) {
-            Ok(decoder::Message::Speed(speed)) => match speed.axis {
-                decoder::MotorAxis::Pan => {
+        let ok = async || -> Result<(), embassy_stm32::usart::Error> {
+            match decoder::decode(message) {
+                Ok(decoder::Message::Speed(speed)) => match speed.axis {
+                    decoder::MotorAxis::Pan => {
+                        controller
+                            .lock()
+                            .await
+                            .motor_x
+                            .set_velocity(speed.velocity)
+                            .await?;
+                    }
+                    decoder::MotorAxis::Tilt => {
+                        let mut controller = controller.lock().await;
+                        controller.motor_y.set_velocity(speed.velocity).await?;
+                        controller.motor_z.set_velocity(-1 * speed.velocity).await?;
+                    }
+                },
+                Ok(decoder::Message::Stop(axis)) => {
+                    info!("Stop: {:?}", axis);
+                }
+                Ok(decoder::Message::Trigger(status)) => {
+                    info!("Trigger: {:?}", status);
                     controller
                         .lock()
                         .await
-                        .motor_x
-                        .set_velocity(speed.velocity)
-                        .await;
+                        .trigger_servo
+                        .set_position(if status { 180 } else { 0 });
                 }
-                decoder::MotorAxis::Tilt => {
-                    let mut controller = controller.lock().await;
-                    controller.motor_y.set_velocity(speed.velocity).await;
-                    controller.motor_z.set_velocity(-1 * speed.velocity).await;
+                Err(e) => {
+                    defmt::warn!("Error decoding message: {:?}", e);
                 }
-            },
-            Ok(decoder::Message::Stop(axis)) => {
-                info!("Stop: {:?}", axis);
-            }
-            Ok(decoder::Message::Trigger(status)) => {
-                info!("Trigger: {:?}", status);
-                controller
-                    .lock()
-                    .await
-                    .trigger_servo
-                    .set_position(if status { 180 } else { 0 });
-            }
-            Err(e) => {
-                defmt::warn!("Error decoding message: {:?}", e);
-            }
+            };
+
+            Ok(())
+        };
+
+        if let Err(e) = ok().await {
+            defmt::warn!("Error executing command: {:?}", e);
         }
     }
 }

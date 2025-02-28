@@ -55,7 +55,7 @@ pub fn decode(message: &str) -> Result<Message, DecodeError> {
     let mut chars = message.chars();
     let command = chars.next().ok_or(DecodeError::InvalidAxis)?;
 
-    if (command == 't') {
+    if command == 't' {
         let trigger = chars
             .as_str()
             .parse::<bool>()
