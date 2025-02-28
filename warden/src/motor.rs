@@ -1,20 +1,14 @@
-use core::{
-    borrow::BorrowMut,
-    fmt::{Debug, Display},
-    future::Future,
-};
-
-use defmt::debug;
 use embassy_stm32::{
     gpio::{AnyPin, Level, Output, Speed},
     mode::Async,
     usart::{Error, Uart},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex};
-use tmc2209::{reg::IFCNT, Reader};
+use tmc2209::Reader;
 
 pub type UartAsyncMutex = mutex::Mutex<CriticalSectionRawMutex, Uart<'static, Async>>;
 
+#[allow(dead_code)]
 pub struct Motor<'d> {
     uart: &'static UartAsyncMutex,
     uart_address: u8,
@@ -25,6 +19,7 @@ pub struct Motor<'d> {
     reader: Reader,
 }
 
+#[allow(dead_code)]
 struct TmcRegisters {
     gconf: tmc2209::reg::GCONF,
     vactual: tmc2209::reg::VACTUAL,
@@ -54,12 +49,11 @@ impl<'d> Motor<'d> {
         ihold_irun.set_irun(16);
 
         // stealthchop
-        let mut chopconf = tmc2209::reg::CHOPCONF::default();
+        // let mut chopconf = tmc2209::reg::CHOPCONF::default();
         // chopconf.set_t
 
         // let board crash (unwrap) if init fails, can't easily recover
         let mut guard = uart.lock().await;
-        let mut uart_mut = guard.borrow_mut();
         {
             let uart_mut: &mut Uart<'static, embassy_stm32::mode::Async> = &mut *guard;
             tmc2209::send_write_request(uart_address, gconf, uart_mut).unwrap();
@@ -101,7 +95,6 @@ impl<'d> Motor<'d> {
         register: T,
     ) -> Result<(), Error> {
         let mut guard = self.uart.lock().await;
-        let mut uart_mut = guard.borrow_mut();
         {
             let uart_mut: &mut Uart<'static, embassy_stm32::mode::Async> = &mut *guard;
             tmc2209::send_write_request(self.uart_address, register, uart_mut)?;

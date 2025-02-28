@@ -15,7 +15,6 @@ use embassy_stm32::{
     bind_interrupts, peripherals, usart, usart::Uart, usb as usb_interrupt, Config,
 };
 use embassy_time::Timer;
-use embedded_hal::pwm::SetDutyCycle;
 use motor::{Motor, UartAsyncMutex};
 use servo::Servo;
 use static_cell::StaticCell;
@@ -71,7 +70,7 @@ async fn main(spawner: Spawner) {
     // TX4: PC10
     let mut uart_config = embassy_stm32::usart::Config::default();
     uart_config.baudrate = 115200;
-    let mut uart = Uart::new(
+    let uart = Uart::new(
         p.USART4,
         p.PC11,
         p.PC10,
@@ -128,7 +127,7 @@ async fn main(spawner: Spawner) {
 
     // let servo = SERVO.init(Servo::new(servo_pwm));
 
-    let mut controller = Controller::new(
+    let controller = Controller::new(
         ControllerPeripherials {
             uart,
 

@@ -1,6 +1,4 @@
-use crate::controller::Controller;
 use crate::{decoder, ControllerMutex, Irqs};
-use core::borrow::{Borrow, BorrowMut};
 use defmt::{info, panic, Format};
 use embassy_futures::join::join;
 use embassy_stm32::peripherals::{PA11, PA12, USB};

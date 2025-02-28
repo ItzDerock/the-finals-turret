@@ -1,8 +1,4 @@
-use embassy_stm32::timer::{
-    simple_pwm::{SimplePwm, SimplePwmChannel},
-    GeneralInstance4Channel,
-};
-use embedded_hal::pwm;
+use embassy_stm32::timer::{simple_pwm::SimplePwmChannel, GeneralInstance4Channel};
 
 pub struct Servo<'a, T: GeneralInstance4Channel> {
     pwm: &'a mut SimplePwmChannel<'a, T>,
