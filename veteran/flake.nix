@@ -56,6 +56,7 @@
             python310Packages.torchvision-bin
             python310Packages.python-dotenv
             python310Packages.onnxruntime
+            python310Packages.pyserial
             python310
             coreutils
           ];
