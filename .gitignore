@@ -17,3 +17,13 @@ testing/
 
 model/
 .venv/
+
+# hailo coprocessor stuff
+hailort.log
+hailort-*.log
+.hailo-venv
+.hailo-tappas-venv
+
+# models
+yolov8n.pt
+yolov8n-best.pt
