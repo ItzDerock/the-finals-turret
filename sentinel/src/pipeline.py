@@ -9,6 +9,7 @@ import gi
 gi.require_version('Gst', '1.0')
 import os
 import setproctitle
+from cli import options
 from hailo_apps_infra.hailo_rpi_common import (
     get_default_parser,
     detect_hailo_arch,
@@ -40,7 +41,7 @@ class GStreamerPoseEstimationApp(GStreamerApp):
 
         # overrides
         args.sync = "false"
-        args.hef_path = './model/yolov8s_pose.hef'
+        args.hef_path = options.hef
         args.show_fps = True
 
         # Call the parent class constructor
