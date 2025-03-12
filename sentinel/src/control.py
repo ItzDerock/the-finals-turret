@@ -1,19 +1,25 @@
-import pyserial
+from multiprocessing.connection import Connection
+import serial
 from PID_Py.PID import PID
 
 class Control:
     pid_tilt: PID
     pid_pan: PID
 
-    def __init__(self, port='/dev/ttyUSB0'):
-        self.serial = pyserial.Serial(port, 115200)
+    def __init__(self, port: str | None):
+        if port == 'sim' or port is None:
+            self.serial = serial.Serial()
+        else:
+            self.serial = serial.Serial(port, 115200)
+
         self.pid_tilt = PID(kp=4, ki=0, kd=8)
         self.pid_pan = PID(kp=4, ki=0, kd=8)
 
-    def updateLoop(self, pipe):
+    def updateLoop(self, pipe: Connection):
         while True:
             pan_error, tilt_error = pipe.recv()
             self.update(pan_error, tilt_error)
+            print(pan_error, tilt_error)
 
 
     # Runs single update
@@ -25,7 +31,8 @@ class Control:
 
     # Low level communication
     def send(self, data):
-        self.serial.write(data)
+        if self.serial.is_open:
+            self.serial.write(data)
 
     def receive(self):
         return self.serial.read()

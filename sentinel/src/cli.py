@@ -5,6 +5,7 @@ parser.add_argument('-d', '--dry-run', action='store_true')
 parser.add_argument('-v', '--video', default='/dev/video32')
 parser.add_argument('-V', '--verbose', action='store_true')
 parser.add_argument('-m', '--hef', default='model/yolov8s_pose.hef')
+parser.add_argument('-b', '--board', default='/dev/ttyUSB0')
 options = parser.parse_args()
 
 # Let user know of certain flags

@@ -5,8 +5,8 @@ from typing import Tuple
 class Person:
     id: int
     confidence: float
-    bbox
-    landmarks
+    # bbox
+    # landmarks
     dimensions: Tuple[int, int]
 
     def __init__(self, id: int, confidence: float, bbox, landmarks, dimensions):
@@ -41,7 +41,7 @@ class Person:
         width, height = self.dimensions
 
         if self.landmarks and len(self.landmarks) > 0:
-            points = self.landmarks[0].get_points
+            points = self.landmarks[0].get_points()
             left_eye = self.convert_normalized_to_absolute(points[KEYPOINTS["left_eye"]])
             right_eye = self.convert_normalized_to_absolute(points[KEYPOINTS["right_eye"]])
 

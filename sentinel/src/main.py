@@ -6,7 +6,7 @@ from keypoints import KEYPOINTS
 import cv2
 import hailo
 from multiprocessing import Process, Pipe
-from communication import Communication
+from control import Control
 from person import Person
 from cli import options
 
@@ -19,14 +19,13 @@ from pipeline import GStreamerPoseEstimationApp
 
 class TurretContext(app_callback_class):
     comm_thread: Process
-    pipe: Connection
+    # pipe: Connection
 
     def __init__(self):
-        parent_conn, child_conn = Pipe()
-        self.comm_thread = Process(target=Communication('/dev/ttyUSB0').updateLoop, args=(child_conn,))
-        if not options.dry_run:
-            self.comm_thread.start()
-            print("[!] Communication thread started.")
+        parent_conn, child_conn = Pipe(duplex=True)
+        self.comm_thread = Process(target=Control("sim" if options.dry_run else options.board).updateLoop, args=(child_conn,))
+        self.comm_thread.start()
+        print("[!] Communication thread started.")
         self.conn = parent_conn
         super().__init__()
 
@@ -67,38 +66,42 @@ def process_callback(pad, info, user_data: TurretContext):
         landmarks = detection.get_objects_typed(hailo.HAILO_LANDMARKS)
         parsed_detections.append(Person(track_id, confidence, bbox, landmarks, (width, height)))
 
-        if len(landmarks) != 0:
-            points = landmarks[0].get_points()
-            for eye in ['left_eye', 'right_eye']:
-                keypoint_index = KEYPOINTS[eye]
-                point = points[keypoint_index]
-                # Convert normalized coordinates to absolute pixel coordinates
-                # First scale relative to bounding box, then offset by bbox position, then scale to image dimensions
-                x = int((point.x() * bbox.width() + bbox.xmin()) * width)
-                y = int((point.y() * bbox.height() + bbox.ymin()) * height)
-                string_to_print += f"{eye}: x: {x:.2f} y: {y:.2f}\n"
+        # if len(landmarks) != 0:
+        #     points = landmarks[0].get_points()
+        #     for eye in ['left_eye', 'right_eye']:
+        #         keypoint_index = KEYPOINTS[eye]
+        #         point = points[keypoint_index]
+        #         # Convert normalized coordinates to absolute pixel coordinates
+        #         # First scale relative to bounding box, then offset by bbox position, then scale to image dimensions
+        #         x = int((point.x() * bbox.width() + bbox.xmin()) * width)
+        #         y = int((point.y() * bbox.height() + bbox.ymin()) * height)
 
-                if user_data.use_frame:
-                    cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+        #         if user_data.use_frame:
+        #             cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
 
     if user_data.use_frame:
         # Convert the frame to BGR
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         user_data.set_frame(frame)
 
+    if len(parsed_detections) == 0:
+        return Gst.PadProbeReturn.OK
+
     # find closest target
     closest_target = parsed_detections[0]
-    closest_distance = parsed_detections[0].distance(width/2, height/2)
+    closest_distance = -1 #parsed_detections[0].distance(width/2, height/2)
 
     for detection in parsed_detections[1:]:
-        distance = detection.distance(width/2, height/2)
+        distance = -1#detection.distance(width/2, height/2)
         if distance < closest_distance:
             closest_target = detection
             closest_distance = distance
 
-    user_data.conn.send(closest_target)
+    # user_data.conn.send(closest_target)
+    center_x, center_y = closest_target.center()
+    user_data.conn.send((width/2 - center_x, height/2 - center_y))
 
-    print(string_to_print)
+    # print(f"Center: {center_x}, {center_y}")
     return Gst.PadProbeReturn.OK
 
 if __name__ == "__main__":

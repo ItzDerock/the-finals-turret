@@ -10,6 +10,7 @@ gi.require_version('Gst', '1.0')
 import os
 import setproctitle
 from cli import options
+from collections import defaultdict
 from hailo_apps_infra.hailo_rpi_common import (
     get_default_parser,
     detect_hailo_arch,
@@ -28,6 +29,21 @@ from hailo_apps_infra.gstreamer_app import (
     dummy_callback
 )
 
+
+class HailoArgs:
+    def __init__(self):
+        self.input = None
+        self.use_frame = False
+        self.show_fps = False
+        self.arch = None
+        self.hef_path = None
+        self.disable_sync = False
+        self.disable_callback = False
+        self.dump_dot = False
+
+    def to_dict(self):
+        return self.__dict__
+
 #-----------------------------------------------------------------------------------------------
 # User Gstreamer Application
 # -----------------------------------------------------------------------------------------------
@@ -36,13 +52,17 @@ from hailo_apps_infra.gstreamer_app import (
 
 class GStreamerPoseEstimationApp(GStreamerApp):
     def __init__(self, app_callback, user_data):
-        parser = get_default_parser()
-        args = parser.parse_args()
+        args = HailoArgs()
 
-        # overrides
-        args.sync = "false"
-        args.hef_path = options.hef
+        # Set the arguments
+        args.input = options.video
+        args.use_frame = False
         args.show_fps = True
+        args.arch = None
+        args.hef_path = options.hef
+        args.disable_sync = True
+        args.disable_callback = False
+        args.dump_dot = False
 
         # Call the parent class constructor
         super().__init__(args, user_data)
@@ -51,7 +71,7 @@ class GStreamerPoseEstimationApp(GStreamerApp):
         self.batch_size = 1
         self.video_width = 1280
         self.video_height = 720
-        self.hef_path = args.hef_path
+        self.hef_path = options.hef
 
         # Determine the architecture if not specified
         if args.arch is None:
